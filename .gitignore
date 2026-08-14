@@ -2,10 +2,11 @@
 /build-asan/
 /result
 /result-*
+/dist/
+/release/
 /.direnv/
 /.devenv/
 /.git-local/
-flake.nix
 flake.lock
 .cache/
 compile_commands.json

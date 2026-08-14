@@ -1,10 +1,10 @@
-# ASCII Video
+# ASCII video renderer
 
-ASCII Video is a GTK4 application that converts video frames to ASCII art. It
+ASCII video renderer is a GTK4 application that converts video frames to ASCII art. It
 uses GStreamer for playback and a multithreaded CPU renderer for previews and
 exports. It does not require OpenGL or Vulkan and uses the system GTK theme.
 
-![ASCII Video screenshot](image.png)
+![screenshot](image.png)
 
 ## functions
 
@@ -34,21 +34,27 @@ the Nix flake provides the required development dependencies:
 nix develop --no-write-lock-file path:.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/ascii-video [path/to/video]
+./build/ascii-video 
 ```
 
 to run the application through the flake:
 
 ```sh
-nix run . -- [path/to/video]
+nix run . -- 
 ```
 
-the application also has an open button for choosing another video.
+to create a standalone Linux executable and a tar archive, use:
+
+```sh
+./scripts/package.sh
+./release/ascii-video-linux/ascii-video
+```
+
 
 ## build without Nix
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/ascii-video [path/to/video]
+./build/ascii-video 
 ```
