@@ -32,8 +32,11 @@ target_link_libraries(ascii-video PRIVATE
     PkgConfig::GSTREAMER_APP
     PkgConfig::GSTREAMER_VIDEO
     PkgConfig::EPOXY
-    m
 )
+
+if(NOT WIN32)
+    target_link_libraries(ascii-video PRIVATE m)
+endif()
 
 target_compile_options(ascii-video PRIVATE
     -Wall
