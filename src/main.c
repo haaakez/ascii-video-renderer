@@ -6,6 +6,7 @@
 #include <epoxy/gl.h>
 #include <glib/gstdio.h>
 #include <cairo.h>
+#include <pango/pangocairo.h>
 
 #include <math.h>
 #include <string.h>
@@ -43,6 +44,7 @@ typedef struct {
     gfloat palette[3][3];
     gint ramp_glyphs[10];
     gchar *ramp;
+    gchar *font_family;
 } RenderSettings;
 
 typedef struct {
@@ -88,6 +90,7 @@ struct _AppState {
     GtkScale *progress_scale;
     GtkDropDown *speed_dropdown;
     GtkDropDown *preset_dropdown;
+    GtkDropDown *font_dropdown;
     GtkDropDown *color_mode_dropdown;
     GtkDropDown *format_dropdown;
     GtkDropDown *quality_dropdown;
@@ -475,6 +478,7 @@ static void parse_palette(const gchar *text, gfloat palette[3][3])
 static void clear_render_settings(RenderSettings *settings)
 {
     g_clear_pointer(&settings->ramp, g_free);
+    g_clear_pointer(&settings->font_family, g_free);
 }
 
 static gint ramp_glyph_for_character(gunichar character)
@@ -535,15 +539,18 @@ static void copy_render_settings(RenderSettings *destination,
                                  const RenderSettings *source)
 {
     gchar *ramp = g_strdup(source->ramp);
+    gchar *font_family = g_strdup(source->font_family);
 
     clear_render_settings(destination);
     *destination = *source;
     destination->ramp = ramp;
+    destination->font_family = font_family;
 }
 
 static void read_render_settings(AppState *app, RenderSettings *settings)
 {
     gint ascii_size;
+    GObject *font_item;
 
     memset(settings, 0, sizeof(*settings));
     if (app->ascii_size_spin != NULL) {
@@ -608,6 +615,17 @@ static void read_render_settings(AppState *app, RenderSettings *settings)
     }
     settings->ramp_levels = CLAMP((gint)g_utf8_strlen(settings->ramp, -1), 2, 10);
     build_ramp_glyphs(settings);
+
+    settings->font_family = g_strdup("monospace");
+    font_item = app->font_dropdown != NULL ?
+                gtk_drop_down_get_selected_item(app->font_dropdown) : NULL;
+    if (font_item != NULL && GTK_IS_STRING_OBJECT(font_item)) {
+        const gchar *font_name = gtk_string_object_get_string(GTK_STRING_OBJECT(font_item));
+        if (font_name != NULL && *font_name != '\0') {
+            g_free(settings->font_family);
+            settings->font_family = g_strdup(font_name);
+        }
+    }
 }
 
 static gfloat clamp_unit(gfloat value)
@@ -780,7 +798,7 @@ static guint8 *cpu_render_ascii(const VideoFrame *frame,
                          clamp_unit(settings->background[2]));
     cairo_paint(cr);
     cairo_select_font_face(cr,
-                           "JetBrains Mono",
+                           settings->font_family != NULL ? settings->font_family : "monospace",
                            CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, MAX(1.0, glyph_height * 0.9));
@@ -1383,6 +1401,15 @@ static void on_text_setting_changed(GtkEditable *editable, gpointer user_data)
     queue_preview_render(app);
 }
 
+static void on_font_selected(GObject *object, GParamSpec *pspec, gpointer user_data)
+{
+    AppState *app = user_data;
+
+    (void)object;
+    (void)pspec;
+    queue_preview_render(app);
+}
+
 static void on_cell_spin_changed(GtkSpinButton *button, gpointer user_data)
 {
     AppState *app = user_data;
@@ -1980,6 +2007,10 @@ static void load_video(AppState *app, GFile *file)
     GstCaps *caps;
     GstBus *bus;
     GstElement *appsink;
+    GstElement *video_sink_bin;
+    GstElement *video_convert;
+    GstPad *video_convert_sink_pad;
+    GstPad *video_sink_pad;
     gchar *basename;
 
     path = g_file_get_path(file);
@@ -2004,10 +2035,15 @@ static void load_video(AppState *app, GFile *file)
 
     app->pipeline = gst_element_factory_make("playbin", "ascii_playbin");
     appsink = gst_element_factory_make("appsink", "ascii_sink");
-    if (app->pipeline == NULL || appsink == NULL) {
+    video_sink_bin = gst_bin_new("ascii_video_sink");
+    video_convert = gst_element_factory_make("videoconvert", "ascii_video_convert");
+    if (app->pipeline == NULL || appsink == NULL ||
+        video_sink_bin == NULL || video_convert == NULL) {
         set_status(app, "GStreamer playbin/appsink is unavailable");
         g_clear_object(&app->pipeline);
         g_clear_object(&appsink);
+        g_clear_object(&video_sink_bin);
+        g_clear_object(&video_convert);
         g_free(uri);
         g_free(path);
         return;
@@ -2024,8 +2060,34 @@ static void load_video(AppState *app, GFile *file)
                  "enable-last-sample", FALSE,
                  NULL);
     g_signal_connect(appsink, "new-sample", G_CALLBACK(on_new_sample), app);
-    g_object_set(app->pipeline, "uri", uri, "video-sink", appsink, NULL);
-    gst_object_unref(appsink);
+
+    gst_bin_add_many(GST_BIN(video_sink_bin), video_convert, appsink, NULL);
+    if (!gst_element_link(video_convert, appsink)) {
+        set_status(app, "Could not create the video preview sink");
+        gst_object_unref(video_sink_bin);
+        g_clear_object(&app->pipeline);
+        g_free(uri);
+        g_free(path);
+        return;
+    }
+    video_convert_sink_pad = gst_element_get_static_pad(video_convert, "sink");
+    video_sink_pad = gst_ghost_pad_new("sink", video_convert_sink_pad);
+    gst_object_unref(video_convert_sink_pad);
+    if (video_sink_pad == NULL ||
+        !gst_element_add_pad(video_sink_bin, video_sink_pad)) {
+        if (video_sink_pad != NULL) {
+            gst_object_unref(video_sink_pad);
+        }
+        set_status(app, "Could not connect the video preview sink");
+        gst_object_unref(video_sink_bin);
+        g_clear_object(&app->pipeline);
+        g_free(uri);
+        g_free(path);
+        return;
+    }
+
+    g_object_set(app->pipeline, "uri", uri, "video-sink", video_sink_bin, NULL);
+    gst_object_unref(video_sink_bin);
 
     bus = gst_element_get_bus(app->pipeline);
     app->bus_watch_id = gst_bus_add_watch(bus, on_bus_message, app);
@@ -2177,6 +2239,42 @@ static GtkWidget *make_dropdown(const gchar * const *items)
     return dropdown;
 }
 
+static GtkWidget *make_font_dropdown(void)
+{
+    PangoFontMap *font_map = pango_cairo_font_map_get_default();
+    PangoFontFamily **families = NULL;
+    gint family_count = 0;
+    gchar **names;
+    GtkStringList *string_list;
+    GtkWidget *dropdown;
+    guint selected = 0;
+    gint i;
+
+    pango_font_map_list_families(font_map, &families, &family_count);
+    names = g_new0(gchar *, MAX(1, family_count) + 1);
+    if (family_count == 0) {
+        names[0] = g_strdup("monospace");
+    } else {
+        for (i = 0; i < family_count; i++) {
+            names[i] = g_strdup(pango_font_family_get_name(families[i]));
+            if (g_strcmp0(names[i], "JetBrains Mono") == 0) {
+                selected = (guint)i;
+            }
+        }
+    }
+
+    string_list = gtk_string_list_new((const char * const *)names);
+    dropdown = GTK_WIDGET(gtk_drop_down_new(G_LIST_MODEL(string_list), NULL));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(dropdown), selected);
+    gtk_drop_down_set_enable_search(GTK_DROP_DOWN(dropdown), TRUE);
+    gtk_widget_set_hexpand(dropdown, TRUE);
+
+    g_object_unref(string_list);
+    g_strfreev(names);
+    g_free(families);
+    return dropdown;
+}
+
 static GtkWidget *make_scale(gdouble min,
                              gdouble max,
                              gdouble step,
@@ -2314,6 +2412,14 @@ static GtkWidget *build_settings_panel(AppState *app)
     g_signal_connect(ramp, "changed", G_CALLBACK(on_ramp_changed), app);
     app->ramp_entry = GTK_ENTRY(ramp);
     gtk_box_append(GTK_BOX(panel), ramp);
+
+    gtk_box_append(GTK_BOX(panel), field_label("FONT FAMILY"));
+    app->font_dropdown = GTK_DROP_DOWN(make_font_dropdown());
+    g_signal_connect(app->font_dropdown,
+                     "notify::selected",
+                     G_CALLBACK(on_font_selected),
+                     app);
+    gtk_box_append(GTK_BOX(panel), GTK_WIDGET(app->font_dropdown));
 
     gtk_box_append(GTK_BOX(panel), field_label("CHARACTER SHAPE (WIDTH / HEIGHT)"));
     app->glyph_aspect_scale = GTK_SCALE(make_scale(0.25, 1.0, 0.05, 0.58, app));
@@ -3281,7 +3387,9 @@ static void build_window(AppState *app)
     gtk_widget_set_vexpand(settings_scroll, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(settings_scroll), settings);
     export_panel = build_export_panel(app);
-    gtk_widget_set_size_request(export_panel, 380, -1);
+    gtk_widget_set_size_request(export_panel, 320, -1);
+    gtk_widget_set_hexpand(export_panel, FALSE);
+    gtk_widget_set_halign(export_panel, GTK_ALIGN_END);
     gtk_box_append(GTK_BOX(lower_row), settings_scroll);
     gtk_box_append(GTK_BOX(lower_row), export_panel);
     gtk_box_append(GTK_BOX(root), lower_row);

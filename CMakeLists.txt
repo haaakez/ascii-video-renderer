@@ -14,6 +14,7 @@ find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.8)
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
+pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0>=1.18)
 pkg_check_modules(GSTREAMER_APP REQUIRED IMPORTED_TARGET gstreamer-app-1.0>=1.18)
 pkg_check_modules(GSTREAMER_VIDEO REQUIRED IMPORTED_TARGET gstreamer-video-1.0>=1.18)
@@ -26,6 +27,7 @@ add_executable(ascii-video
 target_link_libraries(ascii-video PRIVATE
     PkgConfig::GTK4
     PkgConfig::CAIRO
+    PkgConfig::PANGOCAIRO
     PkgConfig::GSTREAMER
     PkgConfig::GSTREAMER_APP
     PkgConfig::GSTREAMER_VIDEO
