@@ -5,6 +5,8 @@ GStreamer for playback and a multithreaded CPU renderer for the preview and
 exports. The preview works without OpenGL or Vulkan and follows the system GTK
 theme.
 
+![ASCII Video screenshot](image.png)
+
 ## features
 
 - live source and ASCII previews
@@ -55,8 +57,3 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/ascii-video [path/to/video]
 ```
-
-## project policy
-
-the repository is maintained by `@haaakez`. see
-`.github/CONTRIBUTING.md` for commit identity and review rules.

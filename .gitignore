@@ -23,3 +23,4 @@ core.*
 *.mov
 *.gif
 *.png
+!image.png
