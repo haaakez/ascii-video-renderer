@@ -96,7 +96,12 @@ jobs:
           start "" "%ROOT%ascii-video.exe" %*
           EOF
 
-          7z a -tzip dist/ascii-video-windows.zip "$package_dir"
+          # Use the Windows runner's built-in PowerShell archiver.  `7z` is
+          # not installed in the MSYS2 shell used by this job.
+          package_path="$(cygpath -w "$package_dir")"
+          archive_path="$(cygpath -w "dist/ascii-video-windows.zip")"
+          powershell.exe -NoProfile -NonInteractive -Command \
+            "Compress-Archive -Path '$package_path' -DestinationPath '$archive_path' -Force"
 
       - uses: actions/upload-artifact@v4
         with:
