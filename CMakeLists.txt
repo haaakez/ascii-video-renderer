@@ -20,9 +20,11 @@ pkg_check_modules(GSTREAMER_APP REQUIRED IMPORTED_TARGET gstreamer-app-1.0>=1.18
 pkg_check_modules(GSTREAMER_VIDEO REQUIRED IMPORTED_TARGET gstreamer-video-1.0>=1.18)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 
-add_executable(ascii-video
-    src/main.c
-)
+if(WIN32)
+    add_executable(ascii-video WIN32 src/main.c)
+else()
+    add_executable(ascii-video src/main.c)
+endif()
 
 target_link_libraries(ascii-video PRIVATE
     PkgConfig::GTK4

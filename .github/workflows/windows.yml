@@ -42,7 +42,63 @@ jobs:
           cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build-win
 
+      - name: Package Windows runtime
+        run: |
+          set -e
+          package_dir="dist/ascii-video-windows"
+          mkdir -p "$package_dir/bin" \
+                   "$package_dir/lib/gstreamer-1.0" \
+                   "$package_dir/libexec/gstreamer-1.0" \
+                   "$package_dir/share/glib-2.0/schemas"
+
+          cp build-win/ascii-video.exe "$package_dir/"
+          cp README.md "$package_dir/"
+          cp /ucrt64/bin/ffmpeg.exe "$package_dir/bin/"
+          cp -a /ucrt64/lib/gstreamer-1.0/. \
+                "$package_dir/lib/gstreamer-1.0/"
+
+          if [ -f /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe ]; then
+            cp /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe \
+               "$package_dir/libexec/gstreamer-1.0/"
+          fi
+
+          cp -a /ucrt64/share/glib-2.0/schemas/. \
+                "$package_dir/share/glib-2.0/schemas/"
+
+          # Copy DLLs needed by the application, FFmpeg, and dynamically
+          # loaded GStreamer plugins.
+          collect_dlls() {
+            ldd "$1" 2>/dev/null \
+              | awk '$3 ~ /^\/ucrt64\/bin\/.*\.dll$/ { print $3 }'
+          }
+
+          {
+            collect_dlls build-win/ascii-video.exe
+            collect_dlls /ucrt64/bin/ffmpeg.exe
+            for plugin in /ucrt64/lib/gstreamer-1.0/*.dll; do
+              collect_dlls "$plugin"
+            done
+            if [ -f /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe ]; then
+              collect_dlls /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe
+            fi
+          } | sort -u | while read -r dll; do
+            cp -n "$dll" "$package_dir/bin/"
+          done
+
+          cat > "$package_dir/run-ascii-video.cmd" <<'EOF'
+          @echo off
+          set "ROOT=%~dp0"
+          set "PATH=%ROOT%bin;%PATH%"
+          set "GST_PLUGIN_PATH_1_0=%ROOT%lib\gstreamer-1.0"
+          set "GST_PLUGIN_SYSTEM_PATH_1_0=%ROOT%lib\gstreamer-1.0"
+          set "GST_PLUGIN_SCANNER_1_0=%ROOT%libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+          set "GSETTINGS_SCHEMA_DIR=%ROOT%share\glib-2.0\schemas"
+          start "" "%ROOT%ascii-video.exe" %*
+          EOF
+
+          7z a -tzip dist/ascii-video-windows.zip "$package_dir"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ascii-video-windows
-          path: build-win/ascii-video.exe
+          path: dist/ascii-video-windows.zip
